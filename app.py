@@ -103,6 +103,9 @@ def render_student_view(member_token: str):
         st.warning("Nhóm của bạn chỉ có 1 thành viên. Không cần thực hiện đánh giá chéo.")
         return
 
+    n_peers = len(peers)
+    expected_total = n_peers * 100.0
+
     st.markdown(
         f"""
         > 💡 **Hướng dẫn:** 
@@ -112,9 +115,6 @@ def render_student_view(member_token: str):
         > - **Ràng buộc:** Tổng điểm chia cho các bạn phải khớp đúng **100% × {n_peers} = {expected_total:.0f}%**.
         """
     )
-
-    n_peers = len(peers)
-    expected_total = n_peers * 100.0
 
     # Session state for quick reset
     form_key = f"ratings_{member_data['id']}"
