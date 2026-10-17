@@ -103,3 +103,28 @@ def test_pre_evaluation_and_apply_score_later():
         assert m2_after["final_score"] is not None
         # 8.0 * 1.05 = 8.40
         assert m2_after["final_score"] == 8.40
+
+
+def test_delete_member_and_group():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        db_path = Path(tmp_dir) / "test_del.db"
+        storage = Storage(db_path)
+
+        g_id = storage.create_group("Nhóm Cần Xóa", "DEL-01", 8.0)
+        t1 = storage.add_member(g_id, "SV01", "Member 1")
+        t2 = storage.add_member(g_id, "SV02", "Member 2")
+
+        members = storage.get_group_members(g_id)
+        assert len(members) == 2
+
+        # 1. Delete single member
+        m1_id = members[0]["id"]
+        storage.delete_member(m1_id)
+        members_remaining = storage.get_group_members(g_id)
+        assert len(members_remaining) == 1
+        assert members_remaining[0]["student_id"] == "SV02"
+
+        # 2. Delete whole group
+        storage.delete_group(g_id)
+        assert storage.get_group(g_id) is None
+        assert len(storage.get_group_members(g_id)) == 0

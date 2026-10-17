@@ -181,6 +181,18 @@ class Storage:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def delete_member(self, member_id: int) -> bool:
+        """Xóa thành viên khỏi nhóm (tự động xóa đánh giá liên quan)."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM members WHERE id = ?", (member_id,))
+            return True
+
+    def delete_group(self, group_id: int) -> bool:
+        """Xóa nhóm hoàn toàn (tự động xóa toàn bộ thành viên và đánh giá)."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM groups WHERE id = ?", (group_id,))
+            return True
+
     def submit_evaluation(
         self,
         group_id: int,

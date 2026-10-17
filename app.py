@@ -331,6 +331,23 @@ def render_admin_view():
                     c3.markdown(f"**Mức phạt:** {g['penalty_ratio']*100:.0f}%")
                     c4.markdown(f"**Trạng thái:** {'🔒 Đã chốt điểm' if g['is_closed'] == 1 else '🟢 Đang mở'}")
 
+                    # Current members list with delete action
+                    members = storage.get_group_members(g['id'])
+                    if members:
+                        st.markdown("#### Danh sách thành viên hiện tại:")
+                        for idx, m in enumerate(members):
+                            col_m_info, col_m_del = st.columns([4, 1])
+                            with col_m_info:
+                                sub_badge = "✅ Đã nộp" if m["is_submitted"] == 1 else "⏳ Chưa nộp"
+                                st.write(f"**{idx+1}. {m['full_name']}** (`{m['student_id']}`) — *{sub_badge}*")
+                            with col_m_del:
+                                if st.button("🗑️ Xóa", key=f"del_mem_{m['id']}", help=f"Xóa thành viên {m['full_name']}"):
+                                    storage.delete_member(m['id'])
+                                    st.success(f"Đã xóa {m['full_name']}!")
+                                    st.rerun()
+                    else:
+                        st.info("Nhóm này chưa có thành viên nào.")
+
                     # Member addition
                     st.markdown("#### Thêm thành viên vào nhóm:")
                     with st.form(f"add_member_{g['id']}"):
@@ -353,6 +370,18 @@ def render_admin_view():
                                 st.rerun()
                             else:
                                 st.error("Vui lòng điền MSSV và Họ Tên.")
+
+                    # Danger zone: Delete entire group
+                    st.divider()
+                    c_del_space, c_del_grp = st.columns([3, 1.2])
+                    with c_del_grp:
+                        with st.popover("🗑️ Xóa Toàn Bộ Nhóm"):
+                            st.warning(f"Bạn có chắc muốn xóa nhóm **{g['name']}**?")
+                            st.caption("Lưu ý: Mọi thành viên và dữ liệu đánh giá của nhóm này sẽ bị xóa vĩnh viễn.")
+                            if st.button("Xác nhận xóa vĩnh viễn", type="primary", key=f"confirm_del_grp_{g['id']}", use_container_width=True):
+                                storage.delete_group(g['id'])
+                                st.success(f"Đã xóa nhóm {g['name']} thành công!")
+                                st.rerun()
 
     # ---------------- TAB 2: Cấp phát Magic Link ----------------
     with tab2:
