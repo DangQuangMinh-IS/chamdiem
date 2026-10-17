@@ -247,3 +247,50 @@ def test_clone_group_full_data():
         assert cloned_matrix[cm1["id"]][cm2["id"]] == 105.0
         assert cloned_matrix[cm2["id"]][cm1["id"]] == 95.0
 
+
+def test_lock_and_unlock_functionality():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        db_path = Path(tmp_dir) / "test_lock.db"
+        storage = Storage(db_path)
+
+        g_id = storage.create_group("Nhóm Bảo Mật", "SEC-01", 8.0)
+        t1 = storage.add_member(g_id, "SV01", "Member 1")
+        t2 = storage.add_member(g_id, "SV02", "Member 2")
+
+        m1 = storage.get_member_by_token(t1)
+        m2 = storage.get_member_by_token(t2)
+
+        # Default: not locked
+        assert m1["is_locked"] == 0
+
+        # Submit evaluation from SV01
+        ok = storage.submit_evaluation(g_id, m1["id"], {m2["id"]: 100.0})
+        assert ok is True
+
+        # Admin locks SV01
+        storage.set_member_lock(m1["id"], is_locked=True)
+        m1_locked = storage.get_member_by_token(t1)
+        assert m1_locked["is_locked"] == 1
+
+        # Attempting to submit while locked should fail
+        ok_locked = storage.submit_evaluation(g_id, m1["id"], {m2["id"]: 110.0})
+        assert ok_locked is False
+
+        # Admin unlocks SV01
+        storage.set_member_lock(m1["id"], is_locked=False)
+        m1_unlocked = storage.get_member_by_token(t1)
+        assert m1_unlocked["is_locked"] == 0
+
+        # Group-level lock for submitted members
+        storage.set_group_lock(g_id, is_locked=True, only_submitted=True)
+        m1_chk = storage.get_member_by_token(t1)
+        m2_chk = storage.get_member_by_token(t2)
+        assert m1_chk["is_locked"] == 1
+        assert m2_chk["is_locked"] == 0  # SV02 not submitted yet, so not locked
+
+        # Group-level unlock for all
+        storage.set_group_lock(g_id, is_locked=False, only_submitted=False)
+        assert storage.get_member_by_token(t1)["is_locked"] == 0
+        assert storage.get_member_by_token(t2)["is_locked"] == 0
+
+

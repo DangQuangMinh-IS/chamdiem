@@ -103,6 +103,7 @@ def render_student_view(member_token: str):
     group_score_x = member_data["group_score_x"]
     is_closed = member_data["is_closed"] == 1
     is_submitted = member_data["is_submitted"] == 1
+    is_locked = member_data.get("is_locked", 0) == 1
     peers = member_data.get("peers", [])
 
     st.title("🎓 Phiếu Đánh Giá Chéo Thành Viên")
@@ -120,6 +121,8 @@ def render_student_view(member_token: str):
     with col3:
         if is_closed:
             st.warning("🔒 Đợt đánh giá đã đóng")
+        elif is_locked:
+            st.error("🔒 Phiếu đã bị khóa")
         elif is_submitted:
             st.success("✅ Đã nộp phiếu")
         else:
@@ -143,7 +146,25 @@ def render_student_view(member_token: str):
                 c2.info("⏳ Đang chờ Giảng viên chấm điểm nhóm X để quy đổi ra điểm số chính thức.")
         return
 
-    # Case 2: Already submitted (can edit if group is still open)
+    # Case 2: Member's evaluation is locked by Admin
+    if is_locked:
+        st.error("🔒 Phiếu Đánh Giá Của Bạn Đã Được Khóa Bảo Mật")
+        st.markdown(
+            """
+            > 🛡️ **Bảo mật thông tin cá nhân:** 
+            > Phiếu đánh giá của bạn đã được Giảng viên / Quản trị viên khóa an toàn.
+            > Tính năng này giúp bảo mật thông tin đánh giá cá nhân của bạn, ngăn chặn người khác giả danh truy cập vào liên kết này để xem hoặc sửa đổi kết quả chấm điểm.
+            >
+            > 🚫 **Trạng thái:** Bạn không thể xem lại chi tiết điểm đã chấm hoặc chỉnh sửa phiếu đánh giá qua liên kết này.
+            > 
+            > 💡 **Cần sửa lại điểm?** Vui lòng liên hệ trực tiếp Giảng viên / Quản trị viên để được mở khóa phiếu.
+            """
+        )
+        if is_submitted and member_data.get("submitted_at"):
+            st.caption(f"🕒 Thời gian nộp phiếu đã ghi nhận: **{member_data['submitted_at']}**")
+        return
+
+    # Case 3: Already submitted (can edit if group is still open and not locked)
     edit_flag_key = f"editing_{member_data['id']}"
     is_editing = st.session_state.get(edit_flag_key, False)
 
@@ -380,11 +401,11 @@ def render_admin_view():
                     c3.markdown(f"**Mức phạt:** {g['penalty_ratio']*100:.0f}%")
                     c4.markdown(f"**Trạng thái:** {'🔒 Đã chốt điểm' if g['is_closed'] == 1 else '🟢 Đang mở'}")
 
-                    # Group Actions: Sửa thông tin, Copy nhóm, Xóa nhóm
+                    # Group Actions: Sửa thông tin, Copy nhóm, Khóa bảo mật, Xóa nhóm
                     st.write("")
-                    c_act1, c_act2, c_act3 = st.columns(3)
+                    c_act1, c_act2, c_act3, c_act4 = st.columns(4)
                     with c_act1:
-                        with st.popover("✏️ Sửa Thông Tin Nhóm", use_container_width=True):
+                        with st.popover("✏️ Sửa Thông Tin", use_container_width=True):
                             st.markdown(f"**Chỉnh sửa nhóm: `{g['code']}`**")
                             edit_g_name = st.text_input("Tên nhóm / Đề tài", value=g["name"], key=f"edit_gname_{g['id']}")
                             edit_g_code = st.text_input("Mã nhóm (duy nhất)", value=g["code"], key=f"edit_gcode_{g['id']}")
@@ -410,7 +431,7 @@ def render_admin_view():
                                         st.error(f"Lỗi: {e}")
 
                     with c_act2:
-                        with st.popover("📋 Sao Chép Nhóm (Copy)", use_container_width=True):
+                        with st.popover("📋 Sao Chép Nhóm", use_container_width=True):
                             st.markdown(f"**Sao chép toàn bộ dữ liệu nhóm: `{g['code']}`**")
                             st.caption("Tạo bản sao mới bao gồm toàn bộ thành viên (với Magic Link mới độc lập) và toàn bộ ma trận đánh giá chéo đã chấm.")
                             clone_name = st.text_input("Tên nhóm mới", value=f"{g['name']} (Bản sao)", key=f"clone_name_{g['id']}")
@@ -424,6 +445,19 @@ def render_admin_view():
                                     st.error(f"Lỗi khi sao chép: {e}")
 
                     with c_act3:
+                        with st.popover("🔒 Khóa / Mở Phiếu", use_container_width=True):
+                            st.markdown(f"**Khóa bảo mật nhóm: `{g['code']}`**")
+                            st.caption("Khóa phiếu ngăn chặn người khác giả danh truy cập vào xem điểm hoặc chỉnh sửa phiếu đánh giá.")
+                            if st.button("🔒 Khóa tất cả phiếu đã nộp", key=f"lock_all_{g['id']}", use_container_width=True):
+                                cnt = storage.set_group_lock(g['id'], is_locked=True, only_submitted=True)
+                                st.success(f"Đã khóa bảo mật {cnt} phiếu đã nộp!")
+                                st.rerun()
+                            if st.button("🔓 Mở khóa toàn bộ phiếu", key=f"unlock_all_{g['id']}", use_container_width=True):
+                                cnt = storage.set_group_lock(g['id'], is_locked=False, only_submitted=False)
+                                st.success(f"Đã mở khóa toàn bộ {cnt} phiếu!")
+                                st.rerun()
+
+                    with c_act4:
                         with st.popover("🗑️ Xóa Nhóm", use_container_width=True):
                             st.warning(f"Bạn có chắc muốn xóa nhóm **{g['name']}**?")
                             st.caption("Lưu ý: Mọi thành viên và dữ liệu đánh giá của nhóm này sẽ bị xóa vĩnh viễn.")
@@ -432,15 +466,17 @@ def render_admin_view():
                                 st.success(f"Đã xóa nhóm {g['name']} thành công!")
                                 st.rerun()
 
-                    # Current members list with edit, unlock re-evaluation, and delete actions
+                    # Current members list with edit, lock/unlock, and delete actions
                     members = storage.get_group_members(g['id'])
                     if members:
                         st.markdown("#### Danh sách thành viên hiện tại:")
                         for idx, m in enumerate(members):
-                            col_m_info, col_m_edit, col_m_unlock, col_m_del = st.columns([2.8, 0.9, 1.3, 0.8])
+                            col_m_info, col_m_edit, col_m_lock, col_m_del = st.columns([2.8, 0.9, 1.2, 0.7])
                             with col_m_info:
                                 sub_badge = "✅ Đã nộp" if m["is_submitted"] == 1 else "⏳ Chưa nộp"
-                                st.write(f"**{idx+1}. {m['full_name']}** (`{m['student_id']}`) — *{sub_badge}*")
+                                is_m_locked = m.get("is_locked", 0) == 1
+                                lock_badge = "🔒 Đã khóa" if is_m_locked else "🔓 Mở"
+                                st.write(f"**{idx+1}. {m['full_name']}** (`{m['student_id']}`) — *{sub_badge}* | *{lock_badge}*")
                             with col_m_edit:
                                 with st.popover("✏️ Sửa", key=f"pop_edit_m_{m['id']}"):
                                     st.markdown(f"**Sửa thông tin SV `{m['student_id']}`**")
@@ -454,11 +490,23 @@ def render_admin_view():
                                             st.rerun()
                                         else:
                                             st.error("MSSV và Họ Tên không được để trống.")
-                            with col_m_unlock:
-                                if m["is_submitted"] == 1:
-                                    if st.button("🔄 Cho nộp lại", key=f"unlock_m_{m['id']}", help="Mở khóa để sinh viên này có thể vào chấm và gửi lại phiếu"):
-                                        storage.unlock_member_submission(m['id'])
+                                    if m["is_submitted"] == 1:
+                                        st.divider()
+                                        if st.button("🔄 Đặt lại trạng thái chưa nộp", key=f"reset_sub_{m['id']}", help="Xóa trạng thái đã nộp để sinh viên chấm lại từ đầu"):
+                                            storage.unlock_member_submission(m['id'])
+                                            st.success("Đã đặt lại trạng thái chưa nộp!")
+                                            st.rerun()
+                            with col_m_lock:
+                                is_m_locked = m.get("is_locked", 0) == 1
+                                if is_m_locked:
+                                    if st.button("🔓 Mở khóa", key=f"btn_unlock_m_{m['id']}", help="Mở khóa để sinh viên có thể xem/sửa lại phiếu"):
+                                        storage.set_member_lock(m['id'], False)
                                         st.success(f"Đã mở khóa cho {m['full_name']}!")
+                                        st.rerun()
+                                else:
+                                    if st.button("🔒 Khóa", key=f"btn_lock_m_{m['id']}", help="Khóa phiếu để ngăn sinh viên hoặc người khác xem lại/sửa điểm"):
+                                        storage.set_member_lock(m['id'], True)
+                                        st.success(f"Đã khóa phiếu của {m['full_name']}!")
                                         st.rerun()
                             with col_m_del:
                                 if st.button("🗑️ Xóa", key=f"del_mem_{m['id']}", help=f"Xóa thành viên {m['full_name']}"):
@@ -524,6 +572,7 @@ def render_admin_view():
                         "Họ và Tên": m["full_name"],
                         "Email": m["email"] or "",
                         "Trạng thái": "✅ Đã nộp" if m["is_submitted"] == 1 else "⏳ Chưa nộp",
+                        "Khóa bảo mật": "🔒 Đã khóa" if m.get("is_locked") == 1 else "🔓 Mở",
                         "Thời gian nộp": m["submitted_at"] or "",
                         "Magic Link": magic_link,
                     })
@@ -571,8 +620,8 @@ def render_admin_view():
 
             st.markdown("---")
 
-            # Nút chốt điểm hoặc mở lại đợt đánh giá
-            c_action1, c_action2 = st.columns([2, 1])
+            # Nút chốt điểm, mở lại đợt đánh giá, hoặc khóa bảo mật
+            c_action1, c_action2, c_action3 = st.columns([1.5, 1.2, 1.2])
             with c_action1:
                 if not is_closed:
                     action_text = "🔒 Chốt Tỷ Lệ Đóng Góp (%) Của Nhóm" if score_x == 0 else "🚀 Tiến Hành Chốt Điểm Nhóm Này"
@@ -584,13 +633,25 @@ def render_admin_view():
                         except Exception as e:
                             st.error(f"Lỗi tính toán: {e}")
                 else:
-                    st.info("Nhóm đã được chốt sổ và khóa phiếu.")
+                    st.info("Nhóm đã được chốt sổ.")
 
             with c_action2:
                 if is_closed:
                     if st.button("🔓 Mở Lại Đợt Đánh Giá", type="secondary", use_container_width=True):
                         storage.reopen_group(calc_g_id)
                         st.success("Đã mở lại đợt đánh giá cho nhóm!")
+                        st.rerun()
+
+            with c_action3:
+                with st.popover("🛡️ Khóa / Mở Phiếu", use_container_width=True):
+                    st.caption("Khóa bảo mật toàn bộ người chấm trong nhóm này để chống truy cập trái phép.")
+                    if st.button("🔒 Khóa tất cả đã nộp", key=f"tab3_lock_all_{calc_g_id}", use_container_width=True):
+                        cnt = storage.set_group_lock(calc_g_id, is_locked=True, only_submitted=True)
+                        st.success(f"Đã khóa bảo mật {cnt} phiếu đã nộp!")
+                        st.rerun()
+                    if st.button("🔓 Mở khóa toàn bộ", key=f"tab3_unlock_all_{calc_g_id}", use_container_width=True):
+                        cnt = storage.set_group_lock(calc_g_id, is_locked=False, only_submitted=False)
+                        st.success(f"Đã mở khóa toàn bộ {cnt} phiếu!")
                         st.rerun()
 
             # Ma trận đánh giá chéo chi tiết (Xem đánh giá)
@@ -610,6 +671,7 @@ def render_admin_view():
                             "MSSV": ev["student_id"],
                             "Người chấm": ev["full_name"],
                             "Trạng thái": "✅ Đã nộp" if ev["is_submitted"] == 1 else "⏳ Chưa nộp (Khuyết)",
+                            "Khóa bảo mật": "🔒 Đã khóa" if ev.get("is_locked") == 1 else "🔓 Mở",
                         }
                         ev_ratings = matrix.get(ev_id, {})
                         total_given = 0.0

@@ -64,6 +64,7 @@ class Storage:
                     final_score REAL,
                     final_r REAL,
                     final_pct REAL,
+                    is_locked INTEGER DEFAULT 0,
                     FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
                 );
 
@@ -82,6 +83,11 @@ class Storage:
                 );
                 """
             )
+
+            # Migration: Ensure is_locked column exists in existing DBs
+            cols = [r["name"] for r in conn.execute("PRAGMA table_info(members)").fetchall()]
+            if "is_locked" not in cols:
+                conn.execute("ALTER TABLE members ADD COLUMN is_locked INTEGER DEFAULT 0")
 
     def create_group(
         self,
@@ -234,13 +240,39 @@ class Storage:
             return True
 
     def unlock_member_submission(self, member_id: int) -> bool:
-        """Mở khóa để thành viên có thể vào chấm lại."""
+        """Mở khóa để thành viên có thể vào chấm lại (reset trạng thái nộp và mở khóa)."""
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE members SET is_submitted = 0, submitted_at = NULL WHERE id = ?",
+                "UPDATE members SET is_submitted = 0, submitted_at = NULL, is_locked = 0 WHERE id = ?",
                 (member_id,),
             )
             return True
+
+    def set_member_lock(self, member_id: int, is_locked: bool) -> bool:
+        """Khóa hoặc mở khóa phiếu của một thành viên."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE members SET is_locked = ? WHERE id = ?",
+                (1 if is_locked else 0, member_id),
+            )
+            return True
+
+    def set_group_lock(
+        self, group_id: int, is_locked: bool, only_submitted: bool = True
+    ) -> int:
+        """Khóa hoặc mở khóa toàn bộ phiếu trong nhóm."""
+        with self._get_connection() as conn:
+            if only_submitted and is_locked:
+                cursor = conn.execute(
+                    "UPDATE members SET is_locked = 1 WHERE group_id = ? AND is_submitted = 1",
+                    (group_id,),
+                )
+            else:
+                cursor = conn.execute(
+                    "UPDATE members SET is_locked = ? WHERE group_id = ?",
+                    (1 if is_locked else 0, group_id),
+                )
+            return cursor.rowcount
 
     def reopen_group(self, group_id: int) -> bool:
         """Mở lại đợt đánh giá cho nhóm sau khi đã chốt điểm."""
@@ -310,10 +342,11 @@ class Storage:
             id_mapping = {}  # old_id -> new_id
             for m in old_members:
                 new_token = uuid.uuid4().hex[:16]
+                is_locked_val = m["is_locked"] if "is_locked" in m.keys() else 0
                 cur_m = conn.execute(
                     """
-                    INSERT INTO members (group_id, student_id, full_name, email, token, is_submitted, submitted_at, final_score, final_r, final_pct)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO members (group_id, student_id, full_name, email, token, is_submitted, submitted_at, final_score, final_r, final_pct, is_locked)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         new_group_id,
@@ -326,6 +359,7 @@ class Storage:
                         m["final_score"],
                         m["final_r"],
                         m["final_pct"],
+                        is_locked_val,
                     ),
                 )
                 id_mapping[m["id"]] = cur_m.lastrowid
@@ -365,6 +399,12 @@ class Storage:
                 "SELECT is_closed FROM groups WHERE id = ?", (group_id,)
             ).fetchone()
             if not group or group["is_closed"] == 1:
+                return False
+
+            member = conn.execute(
+                "SELECT is_locked FROM members WHERE id = ?", (evaluator_id,)
+            ).fetchone()
+            if member and member["is_locked"] == 1:
                 return False
 
             for target_id, score_pct in ratings.items():

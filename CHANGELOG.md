@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Entity editing: In-place editing for group metadata (name, code, group score, penalty, deadline) and student details (MSSV, name, email).
 - Detailed evaluation matrix viewer: Full evaluator-to-target cross-evaluation grid displaying distributed percentages, submission statuses, and CSV export.
 - Group cloning: Deep duplication of an entire group including metadata, members (with new independent magic tokens), and the complete evaluation matrix.
+- Evaluator lock mechanism: Admin-controlled security lock (`is_locked`) per member or per group to prevent unauthorized access, tampering, or inspection of private peer evaluations via shared links, with a dedicated secure lock screen on the student view.
 - Automated test suite (`tests/test_calculator.py`, `tests/test_storage.py`) covering mathematical invariants, imputation, penalties, overflow, and storage operations.
 - Project documentation in `PROJECT.md` and `README.md`.
 
