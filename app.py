@@ -267,6 +267,12 @@ def render_admin_view():
     # ---------------- TAB 1: Danh sách nhóm ----------------
     with tab1:
         st.subheader("Tạo Nhóm Mới")
+        has_score = st.checkbox(
+            "Đã có điểm nhóm chính thức (X)",
+            value=False,
+            help="Bỏ chọn nếu nhóm muốn tự đánh giá chéo lấy danh sách % đóng góp trước (A 110%, B 100%, C 95%...), nhập điểm sau.",
+            key="create_group_has_score",
+        )
         with st.form("create_group_form"):
             col1, col2 = st.columns(2)
             with col1:
@@ -274,11 +280,6 @@ def render_admin_view():
             with col2:
                 g_code = st.text_input("Mã nhóm (duy nhất)", placeholder="VD: NHOM-01")
 
-            has_score = st.checkbox(
-                "Đã có điểm nhóm chính thức (X)",
-                value=False,
-                help="Bỏ chọn nếu nhóm muốn tự đánh giá chéo lấy danh sách % đóng góp trước (A 110%, B 100%, C 95%...), nhập điểm sau.",
-            )
             if has_score:
                 g_score = st.number_input("Điểm nhóm (X)", min_value=0.1, max_value=10.0, value=8.5, step=0.1)
             else:
