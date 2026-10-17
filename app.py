@@ -143,21 +143,44 @@ def render_student_view(member_token: str):
                 c2.info("⏳ Đang chờ Giảng viên chấm điểm nhóm X để quy đổi ra điểm số chính thức.")
         return
 
-    # Case 2: Already submitted
-    if is_submitted:
+    # Case 2: Already submitted (can edit if group is still open)
+    edit_flag_key = f"editing_{member_data['id']}"
+    is_editing = st.session_state.get(edit_flag_key, False)
+
+    if is_submitted and not is_editing:
         st.success(f"🎉 Bạn đã nộp phiếu đánh giá thành công vào lúc: **{member_data['submitted_at']}**")
         st.markdown(
             """
-            > **Bảo mật:** Phiếu đánh giá của bạn đã được mã hóa và khóa an toàn. 
-            > Kết quả sẽ được tổng hợp tự động sau khi hết hạn đánh giá.
+            > **Bảo mật:** Phiếu đánh giá của bạn đã được ghi nhận an toàn.
+            > Nếu bạn cần điều chỉnh điểm số trước khi hết hạn đánh giá, bạn có thể bấm nút **Chỉnh Sửa Lại Phiếu Chấm** bên dưới.
             """
         )
+        c_re_col1, c_re_col2 = st.columns([1.5, 2])
+        with c_re_col1:
+            if st.button("✏️ Chỉnh Sửa Lại Phiếu Chấm", type="primary", use_container_width=True):
+                prev_evals = storage.get_evaluations_by_evaluator(member_data["group_id"], member_data["id"])
+                form_key = f"ratings_{member_data['id']}"
+                if form_key not in st.session_state:
+                    st.session_state[form_key] = {}
+                for p in peers:
+                    p_id = p["id"]
+                    val = float(prev_evals.get(p_id, 100.0))
+                    st.session_state[form_key][p_id] = val
+                    st.session_state[f"peer_slider_{p_id}"] = val
+                st.session_state[edit_flag_key] = True
+                st.rerun()
         return
 
-    # Case 3: Fill evaluation form
+    # Case 3: Fill evaluation form (initial or re-evaluating)
     if not peers:
         st.warning("Nhóm của bạn chỉ có 1 thành viên. Không cần thực hiện đánh giá chéo.")
         return
+
+    if is_editing:
+        st.warning("⚠️ **Bạn đang ở chế độ chỉnh sửa lại phiếu đánh giá.** Sau khi hoàn tất điều chỉnh, vui lòng bấm **'Cập Nhật & Nộp Lại Phiếu'** ở cuối trang.")
+        if st.button("❌ Hủy bỏ chỉnh sửa (Giữ nguyên phiếu đã nộp)"):
+            st.session_state[edit_flag_key] = False
+            st.rerun()
 
     n_peers = len(peers)
     expected_total = n_peers * 100.0
@@ -181,10 +204,16 @@ def render_student_view(member_token: str):
     # Session state for quick reset
     form_key = f"ratings_{member_data['id']}"
     if form_key not in st.session_state:
-        st.session_state[form_key] = {p["id"]: 100.0 for p in peers}
+        prev_evals = storage.get_evaluations_by_evaluator(member_data["group_id"], member_data["id"])
+        st.session_state[form_key] = {
+            p["id"]: float(prev_evals.get(p["id"], 100.0)) for p in peers
+        }
 
     if st.button("🔄 Đặt lại tất cả 100% (Cào bằng / Đều nhau)"):
-        st.session_state[form_key] = {p["id"]: 100.0 for p in peers}
+        for p in peers:
+            p_id = p["id"]
+            st.session_state[form_key][p_id] = 100.0
+            st.session_state[f"peer_slider_{p_id}"] = 100.0
         st.rerun()
 
     st.markdown("---")
@@ -257,13 +286,15 @@ def render_student_view(member_token: str):
 
     with submit_col:
         is_valid = abs(diff) < 0.001
-        if st.button("🚀 Xác nhận & Nộp phiếu", type="primary", disabled=not is_valid, use_container_width=True):
+        btn_label = "🚀 Cập Nhật & Nộp Lại Phiếu" if is_editing else "🚀 Xác Nhận & Nộp Phiếu"
+        if st.button(btn_label, type="primary", disabled=not is_valid, use_container_width=True):
             success = storage.submit_evaluation(
                 group_id=member_data["group_id"],
                 evaluator_id=member_data["id"],
                 ratings=current_ratings,
             )
             if success:
+                st.session_state[edit_flag_key] = False
                 st.balloons()
                 st.success("Nộp phiếu thành công!")
                 st.rerun()
@@ -349,15 +380,86 @@ def render_admin_view():
                     c3.markdown(f"**Mức phạt:** {g['penalty_ratio']*100:.0f}%")
                     c4.markdown(f"**Trạng thái:** {'🔒 Đã chốt điểm' if g['is_closed'] == 1 else '🟢 Đang mở'}")
 
-                    # Current members list with delete action
+                    # Group Actions: Sửa thông tin, Copy nhóm, Xóa nhóm
+                    st.write("")
+                    c_act1, c_act2, c_act3 = st.columns(3)
+                    with c_act1:
+                        with st.popover("✏️ Sửa Thông Tin Nhóm", use_container_width=True):
+                            st.markdown(f"**Chỉnh sửa nhóm: `{g['code']}`**")
+                            edit_g_name = st.text_input("Tên nhóm / Đề tài", value=g["name"], key=f"edit_gname_{g['id']}")
+                            edit_g_code = st.text_input("Mã nhóm (duy nhất)", value=g["code"], key=f"edit_gcode_{g['id']}")
+                            edit_g_score = st.number_input("Điểm nhóm (X)", min_value=0.0, max_value=10.0, value=float(g["group_score_x"]), step=0.1, key=f"edit_gscore_{g['id']}")
+                            edit_g_penalty = st.slider("Tỷ lệ phạt (%)", min_value=0, max_value=50, value=int(g["penalty_ratio"] * 100), step=5, key=f"edit_gpen_{g['id']}") / 100.0
+                            edit_g_dl = st.text_input("Hạn chót đánh giá", value=g["deadline"] or "", key=f"edit_gdl_{g['id']}")
+                            if st.button("💾 Lưu Thay Đổi", type="primary", key=f"save_g_{g['id']}", use_container_width=True):
+                                if not edit_g_name.strip() or not edit_g_code.strip():
+                                    st.error("Tên nhóm và Mã nhóm không được để trống.")
+                                else:
+                                    try:
+                                        storage.update_group(
+                                            group_id=g['id'],
+                                            name=edit_g_name.strip(),
+                                            code=edit_g_code.strip(),
+                                            group_score_x=edit_g_score,
+                                            penalty_ratio=edit_g_penalty,
+                                            deadline=edit_g_dl.strip() or None,
+                                        )
+                                        st.success("Đã cập nhật thông tin nhóm!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Lỗi: {e}")
+
+                    with c_act2:
+                        with st.popover("📋 Sao Chép Nhóm (Copy)", use_container_width=True):
+                            st.markdown(f"**Sao chép toàn bộ dữ liệu nhóm: `{g['code']}`**")
+                            st.caption("Tạo bản sao mới bao gồm toàn bộ thành viên (với Magic Link mới độc lập) và toàn bộ ma trận đánh giá chéo đã chấm.")
+                            clone_name = st.text_input("Tên nhóm mới", value=f"{g['name']} (Bản sao)", key=f"clone_name_{g['id']}")
+                            clone_code = st.text_input("Mã nhóm mới", value=f"{g['code']}-COPY", key=f"clone_code_{g['id']}")
+                            if st.button("🚀 Xác Nhận Tạo Bản Sao", type="primary", key=f"btn_clone_{g['id']}", use_container_width=True):
+                                try:
+                                    new_gid = storage.clone_group(g['id'], new_code=clone_code.strip(), new_name=clone_name.strip())
+                                    st.success(f"Đã sao chép thành công nhóm mới (ID: {new_gid})!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Lỗi khi sao chép: {e}")
+
+                    with c_act3:
+                        with st.popover("🗑️ Xóa Nhóm", use_container_width=True):
+                            st.warning(f"Bạn có chắc muốn xóa nhóm **{g['name']}**?")
+                            st.caption("Lưu ý: Mọi thành viên và dữ liệu đánh giá của nhóm này sẽ bị xóa vĩnh viễn.")
+                            if st.button("Xác nhận xóa vĩnh viễn", type="primary", key=f"confirm_del_grp_{g['id']}", use_container_width=True):
+                                storage.delete_group(g['id'])
+                                st.success(f"Đã xóa nhóm {g['name']} thành công!")
+                                st.rerun()
+
+                    # Current members list with edit, unlock re-evaluation, and delete actions
                     members = storage.get_group_members(g['id'])
                     if members:
                         st.markdown("#### Danh sách thành viên hiện tại:")
                         for idx, m in enumerate(members):
-                            col_m_info, col_m_del = st.columns([4, 1])
+                            col_m_info, col_m_edit, col_m_unlock, col_m_del = st.columns([2.8, 0.9, 1.3, 0.8])
                             with col_m_info:
                                 sub_badge = "✅ Đã nộp" if m["is_submitted"] == 1 else "⏳ Chưa nộp"
                                 st.write(f"**{idx+1}. {m['full_name']}** (`{m['student_id']}`) — *{sub_badge}*")
+                            with col_m_edit:
+                                with st.popover("✏️ Sửa", key=f"pop_edit_m_{m['id']}"):
+                                    st.markdown(f"**Sửa thông tin SV `{m['student_id']}`**")
+                                    new_mssv = st.text_input("MSSV", value=m["student_id"], key=f"m_mssv_{m['id']}")
+                                    new_name = st.text_input("Họ và Tên", value=m["full_name"], key=f"m_name_{m['id']}")
+                                    new_email = st.text_input("Email", value=m["email"] or "", key=f"m_email_{m['id']}")
+                                    if st.button("Lưu", key=f"save_m_{m['id']}", type="primary", use_container_width=True):
+                                        if new_mssv.strip() and new_name.strip():
+                                            storage.update_member(m['id'], new_mssv.strip(), new_name.strip(), new_email.strip() or None)
+                                            st.success("Đã cập nhật!")
+                                            st.rerun()
+                                        else:
+                                            st.error("MSSV và Họ Tên không được để trống.")
+                            with col_m_unlock:
+                                if m["is_submitted"] == 1:
+                                    if st.button("🔄 Cho nộp lại", key=f"unlock_m_{m['id']}", help="Mở khóa để sinh viên này có thể vào chấm và gửi lại phiếu"):
+                                        storage.unlock_member_submission(m['id'])
+                                        st.success(f"Đã mở khóa cho {m['full_name']}!")
+                                        st.rerun()
                             with col_m_del:
                                 if st.button("🗑️ Xóa", key=f"del_mem_{m['id']}", help=f"Xóa thành viên {m['full_name']}"):
                                     storage.delete_member(m['id'])
@@ -388,18 +490,6 @@ def render_admin_view():
                                 st.rerun()
                             else:
                                 st.error("Vui lòng điền MSSV và Họ Tên.")
-
-                    # Danger zone: Delete entire group
-                    st.divider()
-                    c_del_space, c_del_grp = st.columns([3, 1.2])
-                    with c_del_grp:
-                        with st.popover("🗑️ Xóa Toàn Bộ Nhóm"):
-                            st.warning(f"Bạn có chắc muốn xóa nhóm **{g['name']}**?")
-                            st.caption("Lưu ý: Mọi thành viên và dữ liệu đánh giá của nhóm này sẽ bị xóa vĩnh viễn.")
-                            if st.button("Xác nhận xóa vĩnh viễn", type="primary", key=f"confirm_del_grp_{g['id']}", use_container_width=True):
-                                storage.delete_group(g['id'])
-                                st.success(f"Đã xóa nhóm {g['name']} thành công!")
-                                st.rerun()
 
     # ---------------- TAB 2: Cấp phát Magic Link ----------------
     with tab2:
@@ -481,16 +571,80 @@ def render_admin_view():
 
             st.markdown("---")
 
-            # Nút chốt điểm / chốt tỷ lệ
-            if not is_closed:
-                action_text = "🔒 Chốt Tỷ Lệ Đóng Góp (%) Của Nhóm" if score_x == 0 else "🚀 Tiến Hành Chốt Điểm Nhóm Này"
-                if st.button(action_text, type="primary"):
-                    try:
-                        result = storage.close_and_calculate_group(calc_g_id)
-                        st.success("✅ Đã chốt thành công!")
+            # Nút chốt điểm hoặc mở lại đợt đánh giá
+            c_action1, c_action2 = st.columns([2, 1])
+            with c_action1:
+                if not is_closed:
+                    action_text = "🔒 Chốt Tỷ Lệ Đóng Góp (%) Của Nhóm" if score_x == 0 else "🚀 Tiến Hành Chốt Điểm Nhóm Này"
+                    if st.button(action_text, type="primary"):
+                        try:
+                            result = storage.close_and_calculate_group(calc_g_id)
+                            st.success("✅ Đã chốt thành công!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Lỗi tính toán: {e}")
+                else:
+                    st.info("Nhóm đã được chốt sổ và khóa phiếu.")
+
+            with c_action2:
+                if is_closed:
+                    if st.button("🔓 Mở Lại Đợt Đánh Giá", type="secondary", use_container_width=True):
+                        storage.reopen_group(calc_g_id)
+                        st.success("Đã mở lại đợt đánh giá cho nhóm!")
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Lỗi tính toán: {e}")
+
+            # Ma trận đánh giá chéo chi tiết (Xem đánh giá)
+            with st.expander("🔎 Xem Ma Trận Đánh Giá Chéo Chi Tiết", expanded=False):
+                members = storage.get_group_members(calc_g_id)
+                matrix = storage.get_evaluations_matrix(calc_g_id)
+                if not members:
+                    st.info("Nhóm này chưa có thành viên.")
+                else:
+                    st.markdown("#### Chi tiết điểm số từng thành viên đã chấm cho nhau:")
+                    st.caption("Hàng ngang: Thành viên chấm | Cột dọc: Thành viên được chấm | Giá trị: Tỷ lệ % đã cho")
+
+                    matrix_rows = []
+                    for ev in members:
+                        ev_id = ev["id"]
+                        row_data = {
+                            "MSSV": ev["student_id"],
+                            "Người chấm": ev["full_name"],
+                            "Trạng thái": "✅ Đã nộp" if ev["is_submitted"] == 1 else "⏳ Chưa nộp (Khuyết)",
+                        }
+                        ev_ratings = matrix.get(ev_id, {})
+                        total_given = 0.0
+                        for tg in members:
+                            tg_id = tg["id"]
+                            col_name = f"{tg['full_name']} ({tg['student_id']})"
+                            if tg_id == ev_id:
+                                row_data[col_name] = "— (Tự chấm)"
+                            else:
+                                if tg_id in ev_ratings:
+                                    val = ev_ratings[tg_id]
+                                    total_given += val
+                                    row_data[col_name] = f"{val:.0f}%"
+                                else:
+                                    if ev["is_submitted"] == 0:
+                                        row_data[col_name] = "100% (Khuyết)"
+                                        total_given += 100.0
+                                    else:
+                                        row_data[col_name] = "0%"
+
+                        row_data["Tổng % đã chia"] = f"{total_given:.0f}%"
+                        matrix_rows.append(row_data)
+
+                    df_matrix = pd.DataFrame(matrix_rows)
+                    st.dataframe(df_matrix, use_container_width=True)
+
+                    csv_matrix = io.StringIO()
+                    df_matrix.to_csv(csv_matrix, index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📥 Xuất Ma Trận Đánh Giá Chéo (CSV)",
+                        data=csv_matrix.getvalue(),
+                        file_name=f"ma_tran_danh_gia_{group_info['code']}.csv",
+                        mime="text/csv",
+                        key=f"dl_matrix_{calc_g_id}",
+                    )
 
             # Hiển thị kết quả sau khi đã chốt
             updated_group = storage.get_group(calc_g_id)

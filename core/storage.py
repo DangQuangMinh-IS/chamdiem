@@ -193,6 +193,167 @@ class Storage:
             conn.execute("DELETE FROM groups WHERE id = ?", (group_id,))
             return True
 
+    def update_group(
+        self,
+        group_id: int,
+        name: str,
+        code: str,
+        group_score_x: float = 0.0,
+        penalty_ratio: float = 0.0,
+        deadline: Optional[str] = None,
+    ) -> bool:
+        """Cập nhật thông tin nhóm (Tên nhóm, mã nhóm, điểm X, tỷ lệ phạt, hạn chót)."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE groups
+                SET name = ?, code = ?, group_score_x = ?, penalty_ratio = ?, deadline = ?
+                WHERE id = ?
+                """,
+                (name, code, float(group_score_x), float(penalty_ratio), deadline, group_id),
+            )
+            return True
+
+    def update_member(
+        self,
+        member_id: int,
+        student_id: str,
+        full_name: str,
+        email: Optional[str] = None,
+    ) -> bool:
+        """Cập nhật thông tin thành viên (MSSV, Họ tên, Email)."""
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE members
+                SET student_id = ?, full_name = ?, email = ?
+                WHERE id = ?
+                """,
+                (student_id, full_name, email, member_id),
+            )
+            return True
+
+    def unlock_member_submission(self, member_id: int) -> bool:
+        """Mở khóa để thành viên có thể vào chấm lại."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE members SET is_submitted = 0, submitted_at = NULL WHERE id = ?",
+                (member_id,),
+            )
+            return True
+
+    def reopen_group(self, group_id: int) -> bool:
+        """Mở lại đợt đánh giá cho nhóm sau khi đã chốt điểm."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE groups SET is_closed = 0 WHERE id = ?", (group_id,))
+            return True
+
+    def get_evaluations_by_evaluator(
+        self, group_id: int, evaluator_id: int
+    ) -> Dict[int, float]:
+        """Lấy danh sách các điểm mà thành viên đã chấm trước đó."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT target_id, score_pct
+                FROM evaluations
+                WHERE group_id = ? AND evaluator_id = ?
+                """,
+                (group_id, evaluator_id),
+            ).fetchall()
+            return {int(r["target_id"]): float(r["score_pct"]) for r in rows}
+
+    def clone_group(
+        self,
+        group_id: int,
+        new_code: Optional[str] = None,
+        new_name: Optional[str] = None,
+    ) -> int:
+        """Sao chép toàn bộ nhóm gồm tất cả thành viên, điểm số và ma trận đánh giá."""
+        group = self.get_group(group_id)
+        if not group:
+            raise ValueError(f"Không tìm thấy nhóm ID {group_id}")
+
+        target_name = new_name or f"{group['name']} (Bản sao)"
+        base_code = new_code or f"{group['code']}-COPY"
+        target_code = base_code
+
+        with self._get_connection() as conn:
+            # Tránh trùng mã nhóm
+            count = 1
+            while conn.execute("SELECT id FROM groups WHERE code = ?", (target_code,)).fetchone():
+                target_code = f"{base_code}-{count}"
+                count += 1
+
+            # 1. Tạo nhóm mới
+            cursor = conn.execute(
+                """
+                INSERT INTO groups (name, code, group_score_x, penalty_ratio, deadline, is_closed)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    target_name,
+                    target_code,
+                    group["group_score_x"],
+                    group["penalty_ratio"],
+                    group["deadline"],
+                    group["is_closed"],
+                ),
+            )
+            new_group_id = int(cursor.lastrowid)
+
+            # 2. Sao chép thành viên
+            old_members = conn.execute(
+                "SELECT * FROM members WHERE group_id = ?", (group_id,)
+            ).fetchall()
+
+            id_mapping = {}  # old_id -> new_id
+            for m in old_members:
+                new_token = uuid.uuid4().hex[:16]
+                cur_m = conn.execute(
+                    """
+                    INSERT INTO members (group_id, student_id, full_name, email, token, is_submitted, submitted_at, final_score, final_r, final_pct)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_group_id,
+                        m["student_id"],
+                        m["full_name"],
+                        m["email"],
+                        new_token,
+                        m["is_submitted"],
+                        m["submitted_at"],
+                        m["final_score"],
+                        m["final_r"],
+                        m["final_pct"],
+                    ),
+                )
+                id_mapping[m["id"]] = cur_m.lastrowid
+
+            # 3. Sao chép các đánh giá chéo
+            old_evals = conn.execute(
+                "SELECT * FROM evaluations WHERE group_id = ?", (group_id,)
+            ).fetchall()
+
+            for ev in old_evals:
+                old_ev_id = ev["evaluator_id"]
+                old_tg_id = ev["target_id"]
+                if old_ev_id in id_mapping and old_tg_id in id_mapping:
+                    conn.execute(
+                        """
+                        INSERT INTO evaluations (group_id, evaluator_id, target_id, score_pct)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            new_group_id,
+                            id_mapping[old_ev_id],
+                            id_mapping[old_tg_id],
+                            ev["score_pct"],
+                        ),
+                    )
+
+            return new_group_id
+
     def submit_evaluation(
         self,
         group_id: int,
