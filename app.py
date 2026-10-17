@@ -16,9 +16,34 @@ st.set_page_config(
 
 storage = Storage()
 
+def get_current_base_url() -> str:
+    """Tự động nhận diện URL máy chủ hiện tại (Streamlit Cloud hoặc Localhost)."""
+    try:
+        if hasattr(st, "context"):
+            if getattr(st.context, "url", None):
+                import urllib.parse
+                parsed = urllib.parse.urlparse(st.context.url)
+                if parsed.scheme and parsed.netloc:
+                    return f"{parsed.scheme}://{parsed.netloc}"
+            if getattr(st.context, "headers", None):
+                host = st.context.headers.get("host") or st.context.headers.get("Host")
+                if host:
+                    proto = "http" if ("localhost" in host or "127.0.0.1" in host) else "https"
+                    return f"{proto}://{host}"
+    except Exception:
+        pass
+    return "http://localhost:8501"
+
+
 # Read token from query params
 query_params = st.query_params
-token = query_params.get("token", None)
+raw_token = query_params.get("token", None)
+if isinstance(raw_token, list):
+    token = raw_token[0] if raw_token else None
+else:
+    token = raw_token
+if token:
+    token = str(token).strip()
 
 # Custom styling for mobile and clean look
 st.markdown(
@@ -46,8 +71,13 @@ def render_student_view(member_token: str):
     member_data = storage.get_member_by_token(member_token)
 
     if not member_data:
-        st.error("❌ Đường link đánh giá không hợp lệ hoặc đã hết hạn.")
-        st.info("Vui lòng liên hệ Giảng viên hoặc Trưởng nhóm để được cấp lại liên kết.")
+        st.error("❌ Không tìm thấy thông tin đánh giá cho mã liên kết này.")
+        st.warning(
+            "💡 **Lưu ý:** Nếu bạn vừa tạo nhóm trên máy chủ Cloud (Streamlit Cloud), "
+            "dữ liệu nằm trên Cloud. Hãy mở đường link mang tên miền Cloud của bạn "
+            "(dạng `https://ten-app.streamlit.app/?token=...`) thay vì `http://localhost:8501`."
+        )
+        st.info("Nếu chạy tại máy cá nhân, hãy đảm bảo bạn lấy đúng Magic Link từ Tab 2 của phiên bản đang chạy.")
         return
 
     group_name = member_data["group_name"]
@@ -304,11 +334,12 @@ def render_admin_view():
             selected_group_name = st.selectbox("Chọn nhóm để xem link:", list(group_options.keys()))
             selected_g_id = group_options[selected_group_name]
 
-            # Base URL input for link formatting
+            # Base URL input for link formatting (auto-detected)
+            default_base = get_current_base_url()
             base_url = st.text_input(
                 "Đường dẫn máy chủ (Base URL):",
-                value="http://localhost:8501",
-                help="Khi deploy lên Streamlit Community Cloud, nhập tên miền https://ten-app.streamlit.app vào đây",
+                value=default_base,
+                help="Hệ thống tự động nhận diện tên miền máy chủ hiện tại (Cloud hoặc Local).",
             )
 
             members = storage.get_group_members(selected_g_id)
