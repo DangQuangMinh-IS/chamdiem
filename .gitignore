@@ -1,7 +1,8 @@
-# Byte-compiled / optimized / DLL files
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
 
 # Virtual environments
 .venv/
@@ -9,17 +10,37 @@ venv/
 ENV/
 env/
 
-# IDE & OS files
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# SQLite databases & Local data
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.db
 
-# Test & coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Environment variables & secrets
+# Environment variables and secrets
 .env
-*.local
+.env.*
+!.env.example
+
+# OS generated files
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor and IDE directories
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log
