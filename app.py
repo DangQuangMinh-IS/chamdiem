@@ -49,6 +49,24 @@ if token:
 st.markdown(
     """
     <style>
+    /* 1. Ẩn hoàn toàn Header, Menu 3 chấm, Watermark và liên kết GitHub */
+    #MainMenu {visibility: hidden !important; display: none !important;}
+    header {visibility: hidden !important; display: none !important;}
+    footer {visibility: hidden !important; display: none !important;}
+    [data-testid="stHeader"] {visibility: hidden !important; display: none !important;}
+    [data-testid="stToolbar"] {visibility: hidden !important; display: none !important;}
+    [data-testid="stDecoration"] {visibility: hidden !important; display: none !important;}
+    [data-testid="stStatusWidget"] {visibility: hidden !important; display: none !important;}
+    .stDeployButton {display: none !important;}
+    [data-testid="manage-app-button"] {display: none !important;}
+    a[href*="github.com"] {display: none !important;}
+
+    /* 2. Căn chỉnh lề trên gọn gàng sau khi ẩn header */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+    }
+
     .metric-card {
         background-color: #f8f9fa;
         border-radius: 8px;
