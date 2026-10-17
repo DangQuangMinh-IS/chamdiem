@@ -95,7 +95,10 @@ def render_student_view(member_token: str):
     with col1:
         st.markdown(f"**Học viên:** {member_data['full_name']} (`{member_data['student_id']}`)")
     with col2:
-        st.markdown(f"**Điểm nhóm (X):** `{group_score_x:.2f}`")
+        if group_score_x > 0:
+            st.markdown(f"**Điểm nhóm (X):** `{group_score_x:.2f}`")
+        else:
+            st.markdown("**Điểm nhóm (X):** *Chưa có (Đánh giá tỷ lệ %)*")
     with col3:
         if is_closed:
             st.warning("🔒 Đợt đánh giá đã đóng")
@@ -108,13 +111,18 @@ def render_student_view(member_token: str):
 
     # Case 1: Group is closed
     if is_closed:
-        st.info("📢 Đợt đánh giá của nhóm đã kết thúc và được chốt điểm.")
-        if member_data.get("final_score") is not None:
+        st.info("📢 Đợt đánh giá của nhóm đã kết thúc và được chốt kết quả.")
+        if member_data.get("final_pct") is not None:
             st.markdown("### 🏆 Kết quả chính thức của bạn")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Điểm chính thức", f"{member_data['final_score']:.2f}")
-            c2.metric("Hệ số R nhận được", f"{member_data['final_r']:.4f}")
-            c3.metric("Tỷ lệ đóng góp (%)", f"{member_data['final_pct']:.2f}%")
+            if group_score_x > 0 and member_data.get("final_score") is not None:
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Điểm chính thức", f"{member_data['final_score']:.2f} đ")
+                c2.metric("Tỷ lệ % nhận được", f"{member_data['final_pct']:.2f}%")
+                c3.metric("Hệ số R nhận được", f"{member_data['final_r']:.4f}")
+            else:
+                c1, c2 = st.columns(2)
+                c1.metric("Tỷ lệ % nhận được", f"{member_data['final_pct']:.2f}%")
+                c2.info("⏳ Đang chờ Giảng viên chấm điểm nhóm X để quy đổi ra điểm số chính thức.")
         return
 
     # Case 2: Already submitted
@@ -136,12 +144,18 @@ def render_student_view(member_token: str):
     n_peers = len(peers)
     expected_total = n_peers * 100.0
 
+    guide_col_info = (
+        f"**Cột Điểm quy đổi:** Hiển thị điểm số tương ứng trên thang 10 (theo Điểm nhóm **X = {group_score_x:.2f}**) làm mốc đối chiếu để bạn không chấm quá tay."
+        if group_score_x > 0
+        else "**Cột Tỷ lệ đối chiếu:** Hiển thị tỷ lệ nhận được của bạn so với mức chuẩn 100% (ví dụ: 110%, 100%, 95%). Sau khi Giảng viên chấm điểm nhóm X, điểm của từng bạn sẽ được tính tự động."
+    )
+
     st.markdown(
         f"""
         > 💡 **Hướng dẫn:** 
         > - Mặc định tất cả thành viên là **100%** (đóng góp đều nhau).
         > - Độ chia nhỏ nhất là **1%**. Bạn có thể kéo trượt linh hoạt hoặc bấm vào thanh trượt để chỉnh.
-        > - **Cột Điểm quy đổi:** Hiển thị điểm số tương ứng trên thang 10 (theo Điểm nhóm **X = {group_score_x:.2f}**) làm mốc đối chiếu để bạn không chấm quá tay.
+        > - {guide_col_info}
         > - **Ràng buộc:** Tổng điểm chia cho các bạn phải khớp đúng **100% × {n_peers} = {expected_total:.0f}%**.
         """
     )
@@ -180,22 +194,30 @@ def render_student_view(member_token: str):
             st.session_state[form_key][p_id] = new_val
             current_ratings[p_id] = new_val
         with c_score:
-            equiv_score = group_score_x * (new_val / 100.0)
             diff_from_base = new_val - 100.0
             delta_label = f"{diff_from_base:+.0f}%" if diff_from_base != 0 else "Chuẩn 100%"
-            
-            # Cảnh báo nếu điểm quy đổi vượt trần 10.0
-            if equiv_score > 10.0:
-                st.metric(
-                    label="Điểm tạm tính",
-                    value=f"{equiv_score:.2f} đ",
-                    delta="⚠️ Kịch trần 10.0",
-                    delta_color="inverse",
-                )
+
+            if group_score_x > 0:
+                equiv_score = group_score_x * (new_val / 100.0)
+                # Cảnh báo nếu điểm quy đổi vượt trần 10.0
+                if equiv_score > 10.0:
+                    st.metric(
+                        label="Điểm tạm tính",
+                        value=f"{equiv_score:.2f} đ",
+                        delta="⚠️ Kịch trần 10.0",
+                        delta_color="inverse",
+                    )
+                else:
+                    st.metric(
+                        label="Điểm tạm tính",
+                        value=f"{equiv_score:.2f} đ",
+                        delta=delta_label,
+                        delta_color="normal" if diff_from_base >= 0 else "inverse",
+                    )
             else:
                 st.metric(
-                    label="Điểm tạm tính",
-                    value=f"{equiv_score:.2f} đ",
+                    label="Tỷ lệ nhận được",
+                    value=f"{new_val:.0f}%",
                     delta=delta_label,
                     delta_color="normal" if diff_from_base >= 0 else "inverse",
                 )
@@ -246,13 +268,22 @@ def render_admin_view():
     with tab1:
         st.subheader("Tạo Nhóm Mới")
         with st.form("create_group_form"):
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 g_name = st.text_input("Tên nhóm / Đề tài", placeholder="VD: Nhóm 01 - Hệ Thống AI")
             with col2:
                 g_code = st.text_input("Mã nhóm (duy nhất)", placeholder="VD: NHOM-01")
-            with col3:
-                g_score = st.number_input("Điểm nhóm (X)", min_value=0.0, max_value=10.0, value=8.5, step=0.1)
+
+            has_score = st.checkbox(
+                "Đã có điểm nhóm chính thức (X)",
+                value=False,
+                help="Bỏ chọn nếu nhóm muốn tự đánh giá chéo lấy danh sách % đóng góp trước (A 110%, B 100%, C 95%...), nhập điểm sau.",
+            )
+            if has_score:
+                g_score = st.number_input("Điểm nhóm (X)", min_value=0.1, max_value=10.0, value=8.5, step=0.1)
+            else:
+                g_score = 0.0
+                st.caption("ℹ️ **Chế độ đánh giá tỷ lệ %:** Thành viên tự đánh giá chéo nhau trước để chốt tỷ lệ hưởng (ví dụ: A 110%, B 100%, C 95%...). Sau khi có điểm nhóm X, Giảng viên chỉ cần nhập điểm để tự động quy đổi ra điểm số cho từng người.")
 
             col4, col5 = st.columns(2)
             with col4:
@@ -291,7 +322,8 @@ def render_admin_view():
             st.info("Chưa có nhóm nào trong hệ thống. Hãy tạo nhóm mới ở trên.")
         else:
             for g in groups:
-                with st.expander(f"📁 {g['name']} ({g['code']}) - Điểm nhóm: {g['group_score_x']:.2f}"):
+                score_disp = f"Điểm nhóm: {g['group_score_x']:.2f}" if g['group_score_x'] > 0 else "Chưa có điểm (Đánh giá %)"
+                with st.expander(f"📁 {g['name']} ({g['code']}) - {score_disp}"):
                     c1, c2, c3, c4 = st.columns(4)
                     c1.markdown(f"**Số thành viên:** {g['total_members']}")
                     c2.markdown(f"**Đã nộp:** {g['submitted_count']}/{g['total_members']}")
@@ -385,46 +417,121 @@ def render_admin_view():
             calc_g_id = group_options[selected_calc_group]
             group_info = storage.get_group(calc_g_id)
 
+            score_x = float(group_info['group_score_x'])
+            is_closed = group_info['is_closed'] == 1
+
             col1, col2, col3 = st.columns(3)
-            col1.metric("Điểm nhóm (X)", f"{group_info['group_score_x']:.2f}")
-            col2.metric("Mức phạt vắng mặt", f"{group_info['penalty_ratio']*100:.0f}%")
-            col3.metric("Trạng thái", "🔒 Đã chốt điểm" if group_info["is_closed"] == 1 else "🟢 Đang mở")
+            with col1:
+                if score_x > 0:
+                    st.metric("Điểm nhóm (X)", f"{score_x:.2f}")
+                else:
+                    st.metric("Điểm nhóm (X)", "Chưa nhập (Đánh giá %)")
+            with col2:
+                st.metric("Mức phạt vắng mặt", f"{group_info['penalty_ratio']*100:.0f}%")
+            with col3:
+                st.metric("Trạng thái", "🔒 Đã chốt" if is_closed else "🟢 Đang mở")
 
             st.markdown("---")
-            if st.button("🚀 Tiến Hành Chốt Điểm Nhóm Này", type="primary"):
-                try:
-                    result = storage.close_and_calculate_group(calc_g_id)
-                    st.success("✅ Đã chốt sổ và tính điểm thành công!")
-                except Exception as e:
-                    st.error(f"Lỗi tính toán: {e}")
 
-            # Display results if group is closed
+            # Nút chốt điểm / chốt tỷ lệ
+            if not is_closed:
+                action_text = "🔒 Chốt Tỷ Lệ Đóng Góp (%) Của Nhóm" if score_x == 0 else "🚀 Tiến Hành Chốt Điểm Nhóm Này"
+                if st.button(action_text, type="primary"):
+                    try:
+                        result = storage.close_and_calculate_group(calc_g_id)
+                        st.success("✅ Đã chốt thành công!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi tính toán: {e}")
+
+            # Hiển thị kết quả sau khi đã chốt
             updated_group = storage.get_group(calc_g_id)
             if updated_group and updated_group["is_closed"] == 1:
-                st.markdown("### 🏆 Bảng Điểm Kết Quả Chính Thức")
+                curr_score_x = float(updated_group["group_score_x"])
                 members = storage.get_group_members(calc_g_id)
-                res_data = []
-                for m in members:
-                    res_data.append({
-                        "MSSV": m["student_id"],
-                        "Họ và Tên": m["full_name"],
-                        "Hệ số R": f"{m['final_r']:.4f}" if m['final_r'] is not None else "",
-                        "Điểm chính thức": f"{m['final_score']:.2f}" if m['final_score'] is not None else "",
-                        "Đóng góp (%)": f"{m['final_pct']:.2f}%" if m['final_pct'] is not None else "",
-                        "Trạng thái nộp": "Đúng hạn" if m["is_submitted"] == 1 else "Vắng mặt (Bị phạt)",
-                    })
 
-                df_res = pd.DataFrame(res_data)
-                st.dataframe(df_res, use_container_width=True)
+                if curr_score_x == 0:
+                    st.markdown("### 📋 Bảng Tỷ Lệ Đóng Góp Đã Chốt (Chờ Điểm Nhóm X)")
+                    st.caption("Các thành viên đã hoàn thành đánh giá chéo. Dưới đây là tỷ lệ % nhận được và mô phỏng điểm số theo các mức điểm nhóm dự kiến.")
 
-                csv_res = io.StringIO()
-                df_res.to_csv(csv_res, index=False, encoding="utf-8-sig")
-                st.download_button(
-                    label="📥 Xuất Bảng Điểm Chính Thức (CSV)",
-                    data=csv_res.getvalue(),
-                    file_name=f"bang_diem_{updated_group['code']}.csv",
-                    mime="text/csv",
-                )
+                    res_data = []
+                    for m in members:
+                        pct = m['final_pct'] or 100.0
+                        res_data.append({
+                            "MSSV": m["student_id"],
+                            "Họ và Tên": m["full_name"],
+                            "Tỷ lệ % nhận được": f"{pct:.2f}%",
+                            "Tương ứng nếu X = 8.0": f"{min(10.0, 8.0 * (pct / 100.0)):.2f}",
+                            "Tương ứng nếu X = 8.5": f"{min(10.0, 8.5 * (pct / 100.0)):.2f}",
+                            "Tương ứng nếu X = 9.0": f"{min(10.0, 9.0 * (pct / 100.0)):.2f}",
+                            "Trạng thái nộp": "Đúng hạn" if m["is_submitted"] == 1 else "Vắng mặt (Bị phạt)",
+                        })
+
+                    df_res = pd.DataFrame(res_data)
+                    st.dataframe(df_res, use_container_width=True)
+
+                    # Form nhập điểm nhóm X để quy đổi
+                    st.markdown("---")
+                    st.markdown("#### 🎯 Nhập Điểm Nhóm (X) Để Quy Đổi Ra Điểm Số Chính Thức:")
+                    c_in_x, c_btn_apply = st.columns([2, 1])
+                    with c_in_x:
+                        apply_x = st.number_input("Điểm nhóm X do Giảng viên chấm:", min_value=0.1, max_value=10.0, value=8.5, step=0.1, key=f"apply_x_{calc_g_id}")
+                    with c_btn_apply:
+                        st.write("")
+                        st.write("")
+                        if st.button("⚡ Áp Điểm & Quy Đổi Điểm Số", type="primary", use_container_width=True):
+                            storage.update_group_score(calc_g_id, apply_x)
+                            st.balloons()
+                            st.success(f"Đã quy đổi điểm thành công theo điểm nhóm X = {apply_x:.2f}!")
+                            st.rerun()
+
+                    csv_res = io.StringIO()
+                    df_res.to_csv(csv_res, index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📥 Xuất Bảng Tỷ Lệ Đóng Góp (CSV)",
+                        data=csv_res.getvalue(),
+                        file_name=f"ty_le_dong_gop_{updated_group['code']}.csv",
+                        mime="text/csv",
+                    )
+
+                else:
+                    st.markdown("### 🏆 Bảng Điểm Kết Quả Chính Thức")
+                    res_data = []
+                    for m in members:
+                        pct = m['final_pct'] or 100.0
+                        res_data.append({
+                            "MSSV": m["student_id"],
+                            "Họ và Tên": m["full_name"],
+                            "Điểm chính thức": f"{m['final_score']:.2f}" if m['final_score'] is not None else "",
+                            "Tỷ lệ nhận được (%)": f"{pct:.2f}%",
+                            "Hệ số R": f"{m['final_r']:.4f}" if m['final_r'] is not None else "",
+                            "Trạng thái nộp": "Đúng hạn" if m["is_submitted"] == 1 else "Vắng mặt (Bị phạt)",
+                        })
+
+                    df_res = pd.DataFrame(res_data)
+                    st.dataframe(df_res, use_container_width=True)
+
+                    # Tùy chọn cập nhật lại điểm nhóm X nếu cần
+                    with st.expander("✏️ Cập nhật lại Điểm nhóm (X)"):
+                        c_re_x, c_re_btn = st.columns([2, 1])
+                        with c_re_x:
+                            re_x = st.number_input("Nhập điểm nhóm mới:", min_value=0.1, max_value=10.0, value=curr_score_x, step=0.1, key=f"re_x_{calc_g_id}")
+                        with c_re_btn:
+                            st.write("")
+                            st.write("")
+                            if st.button("Cập nhật lại điểm"):
+                                storage.update_group_score(calc_g_id, re_x)
+                                st.success("Đã cập nhật lại điểm thành công!")
+                                st.rerun()
+
+                    csv_res = io.StringIO()
+                    df_res.to_csv(csv_res, index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📥 Xuất Bảng Điểm Chính Thức (CSV)",
+                        data=csv_res.getvalue(),
+                        file_name=f"bang_diem_{updated_group['code']}.csv",
+                        mime="text/csv",
+                    )
 
 
 # Router: Student View if ?token=... is present, else Admin View

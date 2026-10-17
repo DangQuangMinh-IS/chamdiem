@@ -32,6 +32,7 @@ class MemberScore:
     raw_score: Decimal
     final_score: Decimal
     percentage: Decimal
+    contribution_pct: Decimal
     is_missing: bool
 
 
@@ -91,6 +92,7 @@ def calculate_final_scores(
                     raw_score=final_sc,
                     final_score=quantize_2dp(final_sc),
                     percentage=DECIMAL_HUNDRED,
+                    contribution_pct=DECIMAL_HUNDRED,
                     is_missing=False,
                 )
             },
@@ -219,6 +221,7 @@ def calculate_final_scores(
             if total_budget > DECIMAL_ZERO
             else DECIMAL_ZERO
         )
+        contrib_pct = quantize_2dp(r[i] * DECIMAL_HUNDRED)
         member_scores[i] = MemberScore(
             member_id=i,
             raw_r=raw_r[i].quantize(PRECISION_4DP, rounding=ROUND_HALF_UP),
@@ -226,6 +229,7 @@ def calculate_final_scores(
             raw_score=scores[i],
             final_score=final_rounded[i],
             percentage=pct,
+            contribution_pct=contrib_pct,
             is_missing=(i in missing_evaluators),
         )
 

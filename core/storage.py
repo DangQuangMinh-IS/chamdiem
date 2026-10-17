@@ -237,10 +237,22 @@ class Storage:
                 evals[ev_id][t_id] = float(r["score_pct"])
             return evals
 
-    def close_and_calculate_group(self, group_id: int) -> CalculationResult:
+    def close_and_calculate_group(
+        self, group_id: int, group_score_x: Optional[float] = None
+    ) -> CalculationResult:
         group = self.get_group(group_id)
         if not group:
             raise ValueError(f"Không tìm thấy nhóm {group_id}")
+
+        if group_score_x is not None:
+            score_x = float(group_score_x)
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE groups SET group_score_x = ? WHERE id = ?",
+                    (score_x, group_id),
+                )
+        else:
+            score_x = float(group["group_score_x"])
 
         members = self.get_group_members(group_id)
         member_ids = [m["id"] for m in members]
@@ -248,7 +260,7 @@ class Storage:
         evaluations = self.get_evaluations_matrix(group_id)
 
         result = calculate_final_scores(
-            group_score_x=group["group_score_x"],
+            group_score_x=score_x,
             evaluations=evaluations,
             member_ids=member_ids,
             penalty_ratio=group["penalty_ratio"],
@@ -256,6 +268,7 @@ class Storage:
 
         with self._get_connection() as conn:
             for uid, sc in result.member_scores.items():
+                f_score = float(sc.final_score) if score_x > 0 else None
                 conn.execute(
                     """
                     UPDATE members
@@ -263,9 +276,9 @@ class Storage:
                     WHERE id = ?
                     """,
                     (
-                        float(sc.final_score),
+                        f_score,
                         float(sc.final_r),
-                        float(sc.percentage),
+                        float(sc.contribution_pct),
                         uid,
                     ),
                 )
@@ -274,6 +287,12 @@ class Storage:
             )
 
         return result
+
+    def update_group_score(
+        self, group_id: int, new_group_score_x: float
+    ) -> CalculationResult:
+        """Cập nhật điểm nhóm X và tự động quy đổi ra điểm số chính thức cho từng thành viên."""
+        return self.close_and_calculate_group(group_id, group_score_x=new_group_score_x)
 
     def seed_sample_data(self) -> int:
         with self._get_connection() as conn:

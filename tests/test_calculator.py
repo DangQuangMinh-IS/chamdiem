@@ -153,3 +153,18 @@ def test_single_member_group():
     result = calculate_final_scores(Decimal("9.2"), {}, [1])
     assert result.member_scores[1].final_score == Decimal("9.20")
     assert result.group_average == Decimal("9.20")
+
+
+def test_pre_evaluation_without_group_score():
+    """Groups without a base score X (X = 0) can still lock contribution percentages."""
+    members = [1, 2, 3, 4]
+    evaluations = {
+        1: {2: 100.0, 3: 100.0, 4: 100.0},
+        2: {1: 115.0, 3: 92.5, 4: 92.5},
+        3: {1: 115.0, 2: 95.0, 4: 90.0},
+        4: {1: 110.0, 2: 100.0, 3: 90.0},
+    }
+    result = calculate_final_scores(0.0, evaluations, members)
+    assert result.member_scores[1].contribution_pct > Decimal("100.00")
+    avg_contrib = sum(m.contribution_pct for m in result.member_scores.values()) / 4
+    assert avg_contrib == Decimal("100.00")
