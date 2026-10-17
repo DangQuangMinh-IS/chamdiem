@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from core.storage import Storage
+from core.calculator import calculate_final_scores
 
 # Set page config
 st.set_page_config(
@@ -716,18 +717,44 @@ def render_admin_view():
 
                 if curr_score_x == 0:
                     st.markdown("### 📋 Bảng Tỷ Lệ Đóng Góp Đã Chốt (Chờ Điểm Nhóm X)")
-                    st.caption("Các thành viên đã hoàn thành đánh giá chéo. Dưới đây là tỷ lệ % nhận được và mô phỏng điểm số theo các mức điểm nhóm dự kiến.")
+                    n_m = len(members)
+                    st.info(
+                        f"💡 **Quy tắc bảo toàn quỹ điểm:** Nhóm có **{n_m}** thành viên. "
+                        f"Khi điểm nhóm là **X**, tổng quỹ điểm cả nhóm chia nhau là **{n_m} × X** "
+                        f"(Ví dụ: X = 8.0 thì tổng là **{n_m*8.0:.2f}đ**, X = 8.5 thì tổng là **{n_m*8.5:.2f}đ**, X = 9.0 thì tổng là **{n_m*9.0:.2f}đ** — chứ không phải 90 điểm vì nhóm không đạt 10.0 tuyệt đối). "
+                        f"Bất kỳ ai vượt trần 10.0 sẽ được tự động chia đều phần điểm dư cho các bạn còn lại trong nhóm để bảo toàn 100% quỹ điểm."
+                    )
+
+                    # Compute simulation using official calculator with redistribution
+                    sim_matrix = storage.get_evaluations_matrix(calc_g_id)
+                    sim_ids = [m["id"] for m in members]
+                    p_ratio = updated_group["penalty_ratio"]
+
+                    sim_80, sim_85, sim_90 = {}, {}, {}
+                    try:
+                        r80 = calculate_final_scores(8.0, sim_matrix, sim_ids, penalty_ratio=p_ratio)
+                        sim_80 = {uid: sc.final_score for uid, sc in r80.member_scores.items()}
+                        r85 = calculate_final_scores(8.5, sim_matrix, sim_ids, penalty_ratio=p_ratio)
+                        sim_85 = {uid: sc.final_score for uid, sc in r85.member_scores.items()}
+                        r90 = calculate_final_scores(9.0, sim_matrix, sim_ids, penalty_ratio=p_ratio)
+                        sim_90 = {uid: sc.final_score for uid, sc in r90.member_scores.items()}
+                    except Exception:
+                        pass
 
                     res_data = []
                     for m in members:
+                        m_id = m["id"]
                         pct = m['final_pct'] or 100.0
+                        sc_80 = sim_80.get(m_id, min(10.0, 8.0 * (pct / 100.0)))
+                        sc_85 = sim_85.get(m_id, min(10.0, 8.5 * (pct / 100.0)))
+                        sc_90 = sim_90.get(m_id, min(10.0, 9.0 * (pct / 100.0)))
                         res_data.append({
                             "MSSV": m["student_id"],
                             "Họ và Tên": m["full_name"],
                             "Tỷ lệ % nhận được": f"{pct:.2f}%",
-                            "Tương ứng nếu X = 8.0": f"{min(10.0, 8.0 * (pct / 100.0)):.2f}",
-                            "Tương ứng nếu X = 8.5": f"{min(10.0, 8.5 * (pct / 100.0)):.2f}",
-                            "Tương ứng nếu X = 9.0": f"{min(10.0, 9.0 * (pct / 100.0)):.2f}",
+                            "Tương ứng nếu X = 8.0": f"{sc_80:.2f}",
+                            "Tương ứng nếu X = 8.5": f"{sc_85:.2f}",
+                            "Tương ứng nếu X = 9.0": f"{sc_90:.2f}",
                             "Trạng thái nộp": "Đúng hạn" if m["is_submitted"] == 1 else "Vắng mặt (Bị phạt)",
                         })
 
