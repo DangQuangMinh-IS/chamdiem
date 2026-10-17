@@ -104,11 +104,12 @@ def render_student_view(member_token: str):
         return
 
     st.markdown(
-        """
+        f"""
         > 💡 **Hướng dẫn:** 
         > - Mặc định tất cả thành viên là **100%** (đóng góp đều nhau).
-        > - Bạn có thể tăng % cho bạn đóng góp nhiều hơn và giảm % tương ứng của bạn khác.
-        > - **Ràng buộc:** Tổng điểm chia cho các bạn phải khớp đúng **100% × số thành viên**.
+        > - Độ chia nhỏ nhất là **1%**. Bạn có thể kéo trượt linh hoạt hoặc bấm vào thanh trượt để chỉnh.
+        > - **Cột Điểm quy đổi:** Hiển thị điểm số tương ứng trên thang 10 (theo Điểm nhóm **X = {group_score_x:.2f}**) làm mốc đối chiếu để bạn không chấm quá tay.
+        > - **Ràng buộc:** Tổng điểm chia cho các bạn phải khớp đúng **100% × {n_peers} = {expected_total:.0f}%**.
         """
     )
 
@@ -130,8 +131,8 @@ def render_student_view(member_token: str):
     for peer in peers:
         p_id = peer["id"]
         current_val = float(st.session_state[form_key].get(p_id, 100.0))
-        
-        c_name, c_slider = st.columns([1, 2])
+
+        c_name, c_slider, c_score = st.columns([1.3, 2.2, 1.1])
         with c_name:
             st.markdown(f"**{peer['full_name']}**")
             st.caption(f"MSSV: `{peer['student_id']}`")
@@ -141,13 +142,33 @@ def render_student_view(member_token: str):
                 min_value=50.0,
                 max_value=150.0,
                 value=current_val,
-                step=5.0,
+                step=1.0,
                 format="%.0f%%",
                 key=f"peer_slider_{p_id}",
                 label_visibility="collapsed",
             )
             st.session_state[form_key][p_id] = new_val
             current_ratings[p_id] = new_val
+        with c_score:
+            equiv_score = group_score_x * (new_val / 100.0)
+            diff_from_base = new_val - 100.0
+            delta_label = f"{diff_from_base:+.0f}%" if diff_from_base != 0 else "Chuẩn 100%"
+            
+            # Cảnh báo nếu điểm quy đổi vượt trần 10.0
+            if equiv_score > 10.0:
+                st.metric(
+                    label="Điểm tạm tính",
+                    value=f"{equiv_score:.2f} đ",
+                    delta="⚠️ Kịch trần 10.0",
+                    delta_color="inverse",
+                )
+            else:
+                st.metric(
+                    label="Điểm tạm tính",
+                    value=f"{equiv_score:.2f} đ",
+                    delta=delta_label,
+                    delta_color="normal" if diff_from_base >= 0 else "inverse",
+                )
 
     # Total check
     actual_total = sum(current_ratings.values())
